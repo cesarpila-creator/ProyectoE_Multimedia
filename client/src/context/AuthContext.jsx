@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
+import { useNavigate } from "react-router-dom";
+
 import api from "../services/api";
 
 import { saveToken, removeToken, getToken } from "../utils/auth";
@@ -9,6 +11,8 @@ const AuthContext = createContext();
 
 // PROVIDER
 export const AuthProvider = ({ children }) => {
+  const navigate = useNavigate();
+
   const [user, setUser] = useState(null);
 
   const [loading, setLoading] = useState(true);
@@ -91,7 +95,7 @@ export const AuthProvider = ({ children }) => {
 
     setUser(null);
 
-    window.location.href = "/login";
+    navigate("/login");
   };
 
   return (
