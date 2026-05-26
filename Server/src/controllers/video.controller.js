@@ -147,13 +147,8 @@ const createVideo = async (req, res) => {
 
     console.log("STARTING VIDEO PROCESS");
 
-    // TEMP FILES
+    // TEMP FILE
     const tempInputPath = file.path;
-
-    const outputPath = path.join(
-      __dirname,
-      `../../processed-${Date.now()}.mp4`,
-    );
 
     // ANALYZE VIDEO
     ffmpeg.ffprobe(tempInputPath, async (err, metadata) => {
@@ -191,11 +186,14 @@ const createVideo = async (req, res) => {
         // THUMBNAIL
         const thumbnailPath = await generateThumbnail(tempInputPath);
 
-        // IF VIDEO IS ALREADY COMPATIBLE
-        if (isCompatible) {
-          console.log("VIDEO COMPATIBLE");
+        // ===================================================
+        // VIDEO COMPATIBLE
+        // ===================================================
 
-          // UPLOAD VIDEO
+        if (isCompatible) {
+          console.log("VIDEO IS COMPATIBLE");
+
+          // UPLOAD ORIGINAL VIDEO
           const uploadedVideo = await cloudinary.uploader.upload(
             tempInputPath,
             {
@@ -237,7 +235,7 @@ const createVideo = async (req, res) => {
             status: "processed",
           });
 
-          // CLEAN TEMP FILES
+          // CLEAN FILES
           if (fs.existsSync(tempInputPath)) {
             fs.unlinkSync(tempInputPath);
           }
@@ -253,7 +251,19 @@ const createVideo = async (req, res) => {
           });
         }
 
-        // CREATE TEMP VIDEO RECORD
+        // ===================================================
+        // VIDEO NEEDS CONVERSION
+        // ===================================================
+
+        console.log("VIDEO NEEDS CONVERSION");
+
+        // TEMP OUTPUT
+        const outputPath = path.join(
+          __dirname,
+          `../../processed-${Date.now()}.mp4`,
+        );
+
+        // CREATE TEMP VIDEO
         const video = await Video.create({
           title,
 
@@ -280,12 +290,10 @@ const createVideo = async (req, res) => {
 
         // FAST RESPONSE
         res.status(201).json({
-          message: "Video uploaded and processing started",
+          message: "Video processing started",
 
           video,
         });
-
-        console.log("STARTING FFMPEG CONVERSION");
 
         // CONVERT VIDEO
         ffmpeg(tempInputPath)
@@ -299,9 +307,9 @@ const createVideo = async (req, res) => {
 
           .on("end", async () => {
             try {
-              console.log("VIDEO PROCESSED");
+              console.log("VIDEO CONVERTED");
 
-              // UPLOAD VIDEO
+              // UPLOAD CONVERTED VIDEO
               const uploadedVideo = await cloudinary.uploader.upload(
                 outputPath,
                 {
@@ -327,7 +335,7 @@ const createVideo = async (req, res) => {
                 status: "processed",
               });
 
-              // CLEAN TEMP FILES
+              // CLEAN FILES
               if (fs.existsSync(tempInputPath)) {
                 fs.unlinkSync(tempInputPath);
               }
@@ -340,9 +348,9 @@ const createVideo = async (req, res) => {
                 fs.unlinkSync(thumbnailPath);
               }
 
-              console.log("UPLOAD FINISHED");
+              console.log("PROCESS FINISHED");
             } catch (error) {
-              console.log("CLOUDINARY ERROR");
+              console.log("UPLOAD ERROR");
               console.log(error);
 
               await video.update({
@@ -360,7 +368,7 @@ const createVideo = async (req, res) => {
             });
           });
       } catch (error) {
-        console.log("UPLOAD ERROR");
+        console.log("GENERAL PROCESS ERROR");
         console.log(error);
 
         return res.status(500).json({
@@ -369,7 +377,7 @@ const createVideo = async (req, res) => {
       }
     });
   } catch (error) {
-    console.log("GENERAL ERROR");
+    console.log("CREATE VIDEO ERROR");
     console.log(error);
 
     res.status(500).json({
