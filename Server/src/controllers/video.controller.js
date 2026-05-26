@@ -20,14 +20,9 @@ const cloudinary = require("../config/cloudinary");
 
 const fs = require("fs");
 
-const axios = require("axios");
-
 const path = require("path");
 
-const {
-  generateThumbnail,
-  getVideoDuration,
-} = require("../services/ffmpeg.service");
+const { generateThumbnail } = require("../services/ffmpeg.service");
 
 // GET ALL VIDEOS
 const getVideos = async (req, res) => {
@@ -150,32 +145,20 @@ const createVideo = async (req, res) => {
       });
     }
 
-    // CLOUDINARY URL
-    const videoUrl = file.path;
+    console.log("STARTING VIDEO PROCESS");
 
-    // TEMP LOCAL FILE
-    const tempInputPath = path.join(__dirname, `../../temp-${Date.now()}.mp4`);
+    // TEMP FILES
+    const tempInputPath = file.path;
 
-    // DOWNLOAD VIDEO TEMPORARILY
-    const response = await axios({
-      url: videoUrl,
-      method: "GET",
-      responseType: "stream",
-    });
-
-    const writer = fs.createWriteStream(tempInputPath);
-
-    response.data.pipe(writer);
-
-    await new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-
-      writer.on("error", reject);
-    });
+    const outputPath = path.join(
+      __dirname,
+      `../../processed-${Date.now()}.mp4`,
+    );
 
     // ANALYZE VIDEO
     ffmpeg.ffprobe(tempInputPath, async (err, metadata) => {
       if (err) {
+        console.log("FFPROBE ERROR");
         console.log(err);
 
         return res.status(500).json({
@@ -183,120 +166,210 @@ const createVideo = async (req, res) => {
         });
       }
 
-      const videoStream = metadata.streams.find(
-        (s) => s.codec_type === "video",
-      );
+      try {
+        const videoStream = metadata.streams.find(
+          (s) => s.codec_type === "video",
+        );
 
-      const audioStream = metadata.streams.find(
-        (s) => s.codec_type === "audio",
-      );
+        const audioStream = metadata.streams.find(
+          (s) => s.codec_type === "audio",
+        );
 
-      const videoCodec = videoStream?.codec_name;
+        const videoCodec = videoStream?.codec_name;
 
-      const audioCodec = audioStream?.codec_name;
+        const audioCodec = audioStream?.codec_name;
 
-      const isCompatible =
-        videoCodec === "h264" && (audioCodec === "aac" || !audioCodec);
+        console.log("VIDEO CODEC:", videoCodec);
+        console.log("AUDIO CODEC:", audioCodec);
 
-      // DURATION
-      const duration = Math.floor(metadata.format.duration || 0);
+        const isCompatible =
+          videoCodec === "h264" && (audioCodec === "aac" || !audioCodec);
 
-      // CREATE VIDEO
-      const video = await Video.create({
-        title,
+        // DURATION
+        const duration = Math.floor(metadata.format.duration || 0);
 
-        description,
+        // THUMBNAIL
+        const thumbnailPath = await generateThumbnail(tempInputPath);
 
-        filename: videoUrl,
+        // IF VIDEO IS ALREADY COMPATIBLE
+        if (isCompatible) {
+          console.log("VIDEO COMPATIBLE");
 
-        thumbnail: null,
-
-        duration,
-
-        shareId: uuidv4(),
-
-        UserId: req.user.id,
-
-        categoryId: categoryId || null,
-
-        visibility: "public",
-
-        views: 0,
-
-        status: isCompatible ? "processed" : "processing",
-      });
-
-      // FAST RESPONSE
-      res.status(201).json({
-        message: isCompatible
-          ? "Video uploaded successfully"
-          : "Video uploaded and processing started",
-
-        video,
-      });
-
-      // COMPATIBLE
-      if (isCompatible) {
-        fs.unlinkSync(tempInputPath);
-
-        return;
-      }
-
-      // CONVERT VIDEO
-      const outputPath = path.join(
-        __dirname,
-        `../../processed-${Date.now()}.mp4`,
-      );
-
-      ffmpeg(tempInputPath)
-        .videoCodec("libx264")
-
-        .audioCodec("aac")
-
-        .outputOptions(["-preset fast", "-movflags +faststart"])
-
-        .save(outputPath)
-
-        .on("end", async () => {
-          try {
-            console.log("VIDEO PROCESSED");
-
-            // UPLOAD PROCESSED VIDEO
-            const uploadedVideo = await cloudinary.uploader.upload(outputPath, {
+          // UPLOAD VIDEO
+          const uploadedVideo = await cloudinary.uploader.upload(
+            tempInputPath,
+            {
               resource_type: "video",
-
               folder: "proyectoe/videos",
-            });
+            },
+          );
 
-            // UPDATE VIDEO
-            await video.update({
-              filename: uploadedVideo.secure_url,
+          // UPLOAD THUMBNAIL
+          const uploadedThumbnail = await cloudinary.uploader.upload(
+            thumbnailPath,
+            {
+              folder: "proyectoe/thumbnails",
+            },
+          );
 
-              status: "processed",
-            });
+          // CREATE VIDEO
+          const video = await Video.create({
+            title,
 
-            // CLEAN TEMP FILES
+            description,
+
+            filename: uploadedVideo.secure_url,
+
+            thumbnail: uploadedThumbnail.secure_url,
+
+            duration,
+
+            shareId: uuidv4(),
+
+            UserId: req.user.id,
+
+            categoryId: categoryId || null,
+
+            visibility: "public",
+
+            views: 0,
+
+            status: "processed",
+          });
+
+          // CLEAN TEMP FILES
+          if (fs.existsSync(tempInputPath)) {
             fs.unlinkSync(tempInputPath);
+          }
 
-            fs.unlinkSync(outputPath);
-          } catch (error) {
+          if (fs.existsSync(thumbnailPath)) {
+            fs.unlinkSync(thumbnailPath);
+          }
+
+          return res.status(201).json({
+            message: "Video uploaded successfully",
+
+            video,
+          });
+        }
+
+        // CREATE TEMP VIDEO RECORD
+        const video = await Video.create({
+          title,
+
+          description,
+
+          filename: "",
+
+          thumbnail: "",
+
+          duration,
+
+          shareId: uuidv4(),
+
+          UserId: req.user.id,
+
+          categoryId: categoryId || null,
+
+          visibility: "public",
+
+          views: 0,
+
+          status: "processing",
+        });
+
+        // FAST RESPONSE
+        res.status(201).json({
+          message: "Video uploaded and processing started",
+
+          video,
+        });
+
+        console.log("STARTING FFMPEG CONVERSION");
+
+        // CONVERT VIDEO
+        ffmpeg(tempInputPath)
+          .videoCodec("libx264")
+
+          .audioCodec("aac")
+
+          .outputOptions(["-preset fast", "-movflags +faststart"])
+
+          .save(outputPath)
+
+          .on("end", async () => {
+            try {
+              console.log("VIDEO PROCESSED");
+
+              // UPLOAD VIDEO
+              const uploadedVideo = await cloudinary.uploader.upload(
+                outputPath,
+                {
+                  resource_type: "video",
+                  folder: "proyectoe/videos",
+                },
+              );
+
+              // UPLOAD THUMBNAIL
+              const uploadedThumbnail = await cloudinary.uploader.upload(
+                thumbnailPath,
+                {
+                  folder: "proyectoe/thumbnails",
+                },
+              );
+
+              // UPDATE VIDEO
+              await video.update({
+                filename: uploadedVideo.secure_url,
+
+                thumbnail: uploadedThumbnail.secure_url,
+
+                status: "processed",
+              });
+
+              // CLEAN TEMP FILES
+              if (fs.existsSync(tempInputPath)) {
+                fs.unlinkSync(tempInputPath);
+              }
+
+              if (fs.existsSync(outputPath)) {
+                fs.unlinkSync(outputPath);
+              }
+
+              if (fs.existsSync(thumbnailPath)) {
+                fs.unlinkSync(thumbnailPath);
+              }
+
+              console.log("UPLOAD FINISHED");
+            } catch (error) {
+              console.log("CLOUDINARY ERROR");
+              console.log(error);
+
+              await video.update({
+                status: "error",
+              });
+            }
+          })
+
+          .on("error", async (error) => {
+            console.log("FFMPEG ERROR");
             console.log(error);
 
             await video.update({
               status: "error",
             });
-          }
-        })
-
-        .on("error", async (error) => {
-          console.log(error);
-
-          await video.update({
-            status: "error",
           });
+      } catch (error) {
+        console.log("UPLOAD ERROR");
+        console.log(error);
+
+        return res.status(500).json({
+          message: error.message,
         });
+      }
     });
   } catch (error) {
+    console.log("GENERAL ERROR");
     console.log(error);
 
     res.status(500).json({
