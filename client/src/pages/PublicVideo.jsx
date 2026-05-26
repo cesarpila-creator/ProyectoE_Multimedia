@@ -130,7 +130,7 @@ function PublicVideo() {
               "
             >
               <source
-                src={`http://localhost:5000/storage/videos/${video.filename}`}
+                src={`{video.filename}`}
                 type="video/mp4"
               />
             </video>
