@@ -14,7 +14,7 @@ const Video = require("../models/Video");
 
 const User = require("../models/User");
 
-const Category = require("../models/Category");
+const Category = require("../models/category");
 
 const path = require("path");
 
