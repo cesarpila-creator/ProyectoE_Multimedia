@@ -24,7 +24,7 @@ require("./models/Video");
 
 require("./models/Favorite");
 
-require("./models/Category");
+require("./models/category");
 
 // App
 const app = express();
