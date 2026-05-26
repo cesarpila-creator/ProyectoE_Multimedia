@@ -107,7 +107,7 @@ function VideoCard({
           <img
             src={
               video.thumbnail
-                ? `http://localhost:5000/storage/thumbnails/${video.thumbnail}`
+                ? video.thumbnail
                 : "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4"
             }
             alt={video.title}
