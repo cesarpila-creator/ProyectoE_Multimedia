@@ -1,21 +1,23 @@
 const multer = require("multer");
 
-const path = require("path");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
-// Storage config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "storage/videos");
-  },
+const cloudinary = require("./cloudinary");
 
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + path.extname(file.originalname);
+// STORAGE
+const storage = new CloudinaryStorage({
+  cloudinary,
 
-    cb(null, uniqueName);
-  },
+  params: async (req, file) => ({
+    folder: "proyectoe/videos",
+
+    resource_type: "video",
+
+    public_id: Date.now() + "-" + file.originalname,
+  }),
 });
 
-// File filter
+// FILTER
 const fileFilter = (req, file, cb) => {
   const allowedTypes = [
     "video/mp4",
@@ -31,6 +33,7 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+// MULTER
 const upload = multer({
   storage,
 
