@@ -145,242 +145,62 @@ const createVideo = async (req, res) => {
       });
     }
 
-    console.log("STARTING VIDEO PROCESS");
+    console.log("STARTING CLOUDINARY UPLOAD");
 
     // TEMP FILE
     const tempInputPath = file.path;
 
-    // ANALYZE VIDEO
-    ffmpeg.ffprobe(tempInputPath, async (err, metadata) => {
-      if (err) {
-        console.log("FFPROBE ERROR");
-        console.log(err);
+    // UPLOAD VIDEO
+    const uploadedVideo = await cloudinary.uploader.upload(tempInputPath, {
+      resource_type: "video",
 
-        return res.status(500).json({
-          message: "Error analyzing video",
-        });
-      }
+      folder: "proyectoe/videos",
+    });
 
-      try {
-        const videoStream = metadata.streams.find(
-          (s) => s.codec_type === "video",
-        );
+    console.log("VIDEO UPLOADED");
 
-        const audioStream = metadata.streams.find(
-          (s) => s.codec_type === "audio",
-        );
+    // CREATE VIDEO
+    const video = await Video.create({
+      title,
 
-        const videoCodec = videoStream?.codec_name;
+      description,
 
-        const audioCodec = audioStream?.codec_name;
+      filename: uploadedVideo.secure_url,
 
-        console.log("VIDEO CODEC:", videoCodec);
-        console.log("AUDIO CODEC:", audioCodec);
+      thumbnail:
+        uploadedVideo.secure_url.replace("/upload/", "/upload/so_1/") + ".jpg",
 
-        const isCompatible =
-          videoCodec === "h264" && (audioCodec === "aac" || !audioCodec);
+      duration: 0,
 
-        // DURATION
-        const duration = Math.floor(metadata.format.duration || 0);
+      shareId: uuidv4(),
 
-        // THUMBNAIL
-        const thumbnailPath = await generateThumbnail(tempInputPath);
+      UserId: req.user.id,
 
-        // ===================================================
-        // VIDEO COMPATIBLE
-        // ===================================================
+      categoryId: categoryId || null,
 
-        if (isCompatible) {
-          console.log("VIDEO IS COMPATIBLE");
+      visibility: "public",
 
-          // UPLOAD ORIGINAL VIDEO
-          const uploadedVideo = await cloudinary.uploader.upload(
-            tempInputPath,
-            {
-              resource_type: "video",
-              folder: "proyectoe/videos",
-            },
-          );
+      views: 0,
 
-          // UPLOAD THUMBNAIL
-          const uploadedThumbnail = await cloudinary.uploader.upload(
-            thumbnailPath,
-            {
-              folder: "proyectoe/thumbnails",
-            },
-          );
+      status: "processed",
+    });
 
-          // CREATE VIDEO
-          const video = await Video.create({
-            title,
+    // DELETE TEMP FILE
+    if (fs.existsSync(tempInputPath)) {
+      fs.unlinkSync(tempInputPath);
+    }
 
-            description,
+    return res.status(201).json({
+      message: "Video uploaded successfully",
 
-            filename: uploadedVideo.secure_url,
-
-            thumbnail: uploadedThumbnail.secure_url,
-
-            duration,
-
-            shareId: uuidv4(),
-
-            UserId: req.user.id,
-
-            categoryId: categoryId || null,
-
-            visibility: "public",
-
-            views: 0,
-
-            status: "processed",
-          });
-
-          // CLEAN FILES
-          if (fs.existsSync(tempInputPath)) {
-            fs.unlinkSync(tempInputPath);
-          }
-
-          if (fs.existsSync(thumbnailPath)) {
-            fs.unlinkSync(thumbnailPath);
-          }
-
-          return res.status(201).json({
-            message: "Video uploaded successfully",
-
-            video,
-          });
-        }
-
-        // ===================================================
-        // VIDEO NEEDS CONVERSION
-        // ===================================================
-
-        console.log("VIDEO NEEDS CONVERSION");
-
-        // TEMP OUTPUT
-        const outputPath = path.join(
-          __dirname,
-          `../../processed-${Date.now()}.mp4`,
-        );
-
-        // CREATE TEMP VIDEO
-        const video = await Video.create({
-          title,
-
-          description,
-
-          filename: "",
-
-          thumbnail: "",
-
-          duration,
-
-          shareId: uuidv4(),
-
-          UserId: req.user.id,
-
-          categoryId: categoryId || null,
-
-          visibility: "public",
-
-          views: 0,
-
-          status: "processing",
-        });
-
-        // FAST RESPONSE
-        res.status(201).json({
-          message: "Video processing started",
-
-          video,
-        });
-
-        // CONVERT VIDEO
-        ffmpeg(tempInputPath)
-          .videoCodec("libx264")
-
-          .audioCodec("aac")
-
-          .outputOptions(["-preset fast", "-movflags +faststart"])
-
-          .save(outputPath)
-
-          .on("end", async () => {
-            try {
-              console.log("VIDEO CONVERTED");
-
-              // UPLOAD CONVERTED VIDEO
-              const uploadedVideo = await cloudinary.uploader.upload(
-                outputPath,
-                {
-                  resource_type: "video",
-                  folder: "proyectoe/videos",
-                },
-              );
-
-              // UPLOAD THUMBNAIL
-              const uploadedThumbnail = await cloudinary.uploader.upload(
-                thumbnailPath,
-                {
-                  folder: "proyectoe/thumbnails",
-                },
-              );
-
-              // UPDATE VIDEO
-              await video.update({
-                filename: uploadedVideo.secure_url,
-
-                thumbnail: uploadedThumbnail.secure_url,
-
-                status: "processed",
-              });
-
-              // CLEAN FILES
-              if (fs.existsSync(tempInputPath)) {
-                fs.unlinkSync(tempInputPath);
-              }
-
-              if (fs.existsSync(outputPath)) {
-                fs.unlinkSync(outputPath);
-              }
-
-              if (fs.existsSync(thumbnailPath)) {
-                fs.unlinkSync(thumbnailPath);
-              }
-
-              console.log("PROCESS FINISHED");
-            } catch (error) {
-              console.log("UPLOAD ERROR");
-              console.log(error);
-
-              await video.update({
-                status: "error",
-              });
-            }
-          })
-
-          .on("error", async (error) => {
-            console.log("FFMPEG ERROR");
-            console.log(error);
-
-            await video.update({
-              status: "error",
-            });
-          });
-      } catch (error) {
-        console.log("GENERAL PROCESS ERROR");
-        console.log(error);
-
-        return res.status(500).json({
-          message: error.message,
-        });
-      }
+      video,
     });
   } catch (error) {
     console.log("CREATE VIDEO ERROR");
+
     console.log(error);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: error.message,
     });
   }
